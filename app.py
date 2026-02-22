@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 
 # ══════════════════════════════════════════════════════════════
-#  1. 설정값 및 가중치 사전 (pts 기준)
+#  1. 설정값 및 가중치 사전
 # ══════════════════════════════════════════════════════════════
 MAX_WORKERS     = 10
 REQUEST_TIMEOUT = 6
@@ -21,6 +21,10 @@ WEIGHTS = {
     "그룹 A": 10.0, "그룹 B": 5.0, "그룹 C": 2.0, "": 1.0,
     "PICK_MULTIPLIER": 1.5, "TITLE_BONUS": 3.0
 }
+
+# ── [업데이트] 종합 기사 페널티 설정 ──
+BRIEF_PENALTY = 0.4 
+BRIEF_KEYWORDS = ["브리프", "뉴스픽", "정리", "단신", "게시판", "소식", "모음", "업계", "유통가", "외", "外", "DD퇴근길"]
 
 SENTIMENT_DICT = {
     "positive": ["성장", "흑자", "혁신", "인기", "급증", "돌풍", "1위", "상생", "호조", "성공", "확대", "유치"],
@@ -131,21 +135,40 @@ GROUP_MAP = {
 # ══════════════════════════════════════════════════════════════
 #  3. 수집 및 분석 엔진
 # ══════════════════════════════════════════════════════════════
-def analyze_article_content(link, query):
-    if "naver.com" not in link: return 0.0, 0.0
+
+def analyze_article_content(link, query, title):
+    """본문 밀도 및 종합 기사 여부를 분석하여 정교한 점수 산출"""
+    if "naver.com" not in link: return 0.0, 0.0, 1.0
     try:
         res = requests.get(link, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         soup = BeautifulSoup(res.text, 'html.parser')
         content = soup.select_one('#newsct_article, #articeBody')
+        
         if content:
             text = content.get_text()
-            freq_score = min(text.count(query) * 0.3, 5.0)
+            text_len = len(text)
+            count = text.count(query)
+            
+            # 1) 키워드 집중도 계산
+            density = (count * 1000) / text_len if text_len > 0 else 0
+            freq_score = min(density * 1.5, 5.0) 
+            
+            # 2) 도입부 가점: 첫 200자 이내 키워드 발견 시
+            if query in text[:200]: freq_score += 1.0
+            
+            # 3) 감성 분석
             pos = sum(text.count(w) for w in SENTIMENT_DICT["positive"])
             neg = sum(text.count(w) for w in SENTIMENT_DICT["negative"])
             sentiment_val = (pos - neg) / (pos + neg) if (pos + neg) > 0 else 0.0
-            return freq_score, sentiment_val
+            
+            # 4) 제목 기반 페널티 계수 (DD퇴근길 포함)
+            penalty_ratio = 1.0
+            if any(k in title for k in BRIEF_KEYWORDS):
+                penalty_ratio = BRIEF_PENALTY
+            
+            return freq_score, sentiment_val, penalty_ratio
     except: pass
-    return 0.0, 0.0
+    return 0.0, 0.0, 1.0
 
 def publisher_from_url(link):
     if "naver.com" in link:
@@ -193,7 +216,9 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
                 stop_searching = True
                 break
             raw_items.append({"pub_date": pub_date, "link": item.get('link', ''), "title": html.unescape(re.sub(r'<[^>]*>', '', item.get('title', '')))})
+    
     if not raw_items: return None
+    
     crawl_results = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_idx = {executor.submit(fetch_naver_article_info, item["link"]): idx for idx, item in enumerate(raw_items)}
@@ -201,6 +226,7 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
             idx = future_to_idx[future]
             crawl_results[idx] = future.result()
             progress_bar.progress(int((i+1)/len(raw_items) * 70))
+            
     news_data = []
     for idx, item in enumerate(raw_items):
         info = crawl_results.get(idx, {})
@@ -208,10 +234,12 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
         group = GROUP_MAP.get(pub, "")
         base = WEIGHTS.get(group, 1.0); mult = WEIGHTS["PICK_MULTIPLIER"] if pick == "PICK" else 1.0
         t_bonus = WEIGHTS["TITLE_BONUS"] if query.lower() in item["title"].lower() else 0.0
-        f_score, s_val = 0.0, 0.0
+        
+        f_score, s_val, p_ratio = 0.0, 0.0, 1.0
         if group == "그룹 A" or pick == "PICK":
-            f_score, s_val = analyze_article_content(item["link"], query)
-        impact = (base * mult) + t_bonus + f_score
+            f_score, s_val, p_ratio = analyze_article_content(item["link"], query, item["title"])
+        
+        impact = ((base * mult) + t_bonus + f_score) * p_ratio
         sent = "긍정" if s_val > 0.1 else ("부정" if s_val < -0.1 else "중립")
         news_data.append({
             "그룹": group, "매체명": pub, "제목": f'=HYPERLINK("{item["link"]}", "{item["title"]}")',
@@ -222,7 +250,7 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
     return pd.DataFrame(news_data)
 
 # ══════════════════════════════════════════════════════════════
-#  4. UI 프레임워크 (검색 및 대시보드)
+#  4. UI 프레임워크
 # ══════════════════════════════════════════════════════════════
 st.set_page_config(page_title="글로벌 뉴스 분석", layout="wide")
 st.title("🚀 이슈 파급력 & 리스크 모니터링")
@@ -256,13 +284,9 @@ if search_btn and query:
         st.session_state["df"] = run_search(query, c_id, c_secret, pb, start_dt, end_dt)
         st.session_state["query_val"] = query
 
-# ══════════════════════════════════════════════════════════════
-#  5. 필터 및 결과 리스트 (통합 섹션)
-# ══════════════════════════════════════════════════════════════
 if "df" in st.session_state and st.session_state["df"] is not None:
     df = st.session_state["df"]
     
-    # 5-1. 대시보드 지표
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("종합 파급력", f"{df['pts'].sum():,.1f} pts")
@@ -270,7 +294,6 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     m3.metric("🟢 호재 지수", f"{df['긍정pts'].sum():,.1f} pts")
     m4.metric("🔴 리스크 지수", f"{df['부정pts'].sum():,.1f} pts", delta_color="inverse")
 
-    # 5-2. 차트 및 랭킹
     st.divider()
     lc, rc = st.columns([1.5, 1])
     with lc:
@@ -290,7 +313,6 @@ if "df" in st.session_state and st.session_state["df"] is not None:
         else:
             st.caption("수집된 리스크 기사가 없습니다.")
 
-    # 5-3. 필터 및 정렬 상세 리스트
     st.divider()
     st.subheader("📂 뉴스 클리핑 상세 리스트 (그룹 A/B/C)")
 
@@ -307,7 +329,6 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     with f_col4:
         sort_by = st.selectbox("정렬 기준", ["포인트 높은순", "최신순", "포인트 낮은순"])
 
-    # 필터 적용
     mask = pd.Series([True] * len(df), index=df.index)
     mapped_sel_groups = [("" if g == "미분류" else g) for g in sel_groups]
     mask &= df["그룹"].isin(mapped_sel_groups)
@@ -316,7 +337,6 @@ if "df" in st.session_state and st.session_state["df"] is not None:
 
     df_filtered = df[mask].copy()
 
-    # 정렬 적용
     if sort_by == "포인트 높은순":
         df_filtered = df_filtered.sort_values(by="pts", ascending=False)
     elif sort_by == "포인트 낮은순":
@@ -342,7 +362,6 @@ if "df" in st.session_state and st.session_state["df"] is not None:
 
     st.markdown(render_table(df_filtered), unsafe_allow_html=True)
 
-    # 엑셀 다운로드
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_filtered[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
