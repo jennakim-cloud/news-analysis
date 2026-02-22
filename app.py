@@ -15,24 +15,14 @@ from bs4 import BeautifulSoup
 # ══════════════════════════════════════════════════════════════
 MAX_WORKERS     = 10
 REQUEST_TIMEOUT = 6
-HEADERS = {
-    'User-Agent': (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/124.0.0.0 Safari/537.36'
-    )
-}
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
 
 WEIGHTS = {
-    "그룹 A": 10.0,
-    "그룹 B": 5.0,
-    "그룹 C": 2.0,
-    "":       1.0,
-    "PICK_MULTIPLIER": 1.5,
-    "TITLE_BONUS": 3.0
+    "그룹 A": 10.0, "그룹 B": 5.0, "그룹 C": 2.0, "": 1.0,
+    "PICK_MULTIPLIER": 1.5, "TITLE_BONUS": 3.0
 }
 
-# [업데이트] 페널티 강화 키워드
+# 페널티 강화 키워드 (종합 보도 방지)
 BRIEF_KEYWORDS = [
     "브리프", "뉴스픽", "정리", "단신", "게시판", "소식", "모음", "업계", "유통가", "외", "外", 
     "DD퇴근길", "AT패션", "N2 유통", "유통 레이더", "유통갤러리", "유통가 뉴스픽", 
@@ -53,9 +43,8 @@ GROUP_BADGE = {
 }
 
 # ══════════════════════════════════════════════════════════════
-#  2. 매핑 테이블 (사용자 제공 데이터 통합)
+#  2. 매핑 테이블 (사용자 제공 데이터 전체)
 # ══════════════════════════════════════════════════════════════
-
 FIXED_MAP = {
     "1conomynews": "1코노미뉴스", "cctimes": "충청타임즈", "chungnamilbo": "충남일보", "dtnews24": "대전뉴스",
     "enetnews": "이넷뉴스", "financialreview": "파이낸셜리뷰", "globalepic": "글로벌에픽", "gokorea": "고코리아",
@@ -73,7 +62,7 @@ FIXED_MAP = {
     "ilyo": "일요신문", "hankooki": "스포츠한국", "ezyeconomy": "이지경제", "enewstoday": "이뉴스투데이",
     "ekn": "에너지경제", "dizzotv": "디지틀조선일보", "cstimes": "컨슈머타임스", "consumernews": "소비자가만드는신문",
     "ceoscoredaily": "CEO스코어데일리", "breaknews": "브레이크뉴스", "bizwnews": "비즈월드", "beyondpost": "비욘드포스트",
-    "asiatime": "아시아타임즈", "apnews": "아시아에이", "biz": "뉴데일리", "viva100": "브릿지경제",
+    "asiatime": "아시아타임즈", "apnews": "ap뉴스", "biz": "뉴데일리", "viva100": "브릿지경제",
     "srtimes": "SR타임스", "kpenews": "한국정경신문", "news2day": "뉴스투데이", "fashionbiz": "패션비즈",
     "econovill": "이코노믹리뷰", "businessplus": "비즈니스플러스", "newspim": "뉴스핌", "m-i": "매일일보",
     "pointdaily": "포인트데일리", "ajunews": "아주경제", "asiatoday": "아시아투데이", "xportsnews": "엑스포츠뉴스",
@@ -147,18 +136,20 @@ GROUP_MAP = {
 }
 
 # ══════════════════════════════════════════════════════════════
-#  3. 핵심 분석 함수 (지능형 보정 반영)
+#  3. 핵심 분석 엔진 (지능형 보정 반영)
 # ══════════════════════════════════════════════════════════════
 
 def analyze_article_content(link: str, query: str, title: str, is_pick: bool):
     """기사의 본문을 분석하여 핵심 주제 여부와 감성 산출"""
-    if "naver.com" not in link and "apparelnews" not in link:
+    # 네이버 및 어패럴뉴스 등 외부 매체 지원을 위한 크롤링 대상 확장
+    if "naver.com" not in link and "apparelnews" not in link and "ajunews" not in link:
         return 0.0, 0.0, 1.0, 1.0
+        
     try:
         res = requests.get(link, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         soup = BeautifulSoup(res.text, 'html.parser')
-        # 네이버 뉴스 및 어패럴뉴스 등 지원
-        content = soup.select_one('#newsct_article, #articeBody, .view_con, #articleBodyContents')
+        # 다양한 본문 선택자 대응
+        content = soup.select_one('#newsct_article, #articeBody, .view_con, #articleBodyContents, .article_view')
         if content:
             text = content.get_text()
             text_len = len(text)
@@ -168,23 +159,25 @@ def analyze_article_content(link: str, query: str, title: str, is_pick: bool):
             density = (count * 1000) / text_len if text_len > 0 else 0
             
             # 2) 나열형 기사 판별 (중요 보정)
-            # 본문은 긴데 키워드 밀도가 낮으면 정보 나열형으로 판단
+            # 본문은 긴데 키워드 밀도가 낮으면 정보 나열형(브리프/종합단신)으로 판단
             is_listing = True if text_len > 1000 and density < 1.5 else False
             
             # 3) 기본 점수 산출
             freq_score = min(density * 2.0, 5.0)
-            if query in text[:200]: freq_score += 1.5 # 도입부 가점
+            if query in text[:200]: freq_score += 1.5 # 도입부(150~200자) 가점
             
-            # 4) 제목 구조 페널티 (사용자 피드백 반영)
+            # 4) 제목 구조 페널티 (객관성 확보 로직)
             penalty_ratio = 1.0
             list_markers = title.count('·') + title.count(',') + title.count('|') + title.count('/')
             is_brief = any(k in title for k in BRIEF_KEYWORDS)
             
             if is_brief or list_markers >= 2:
-                # 구제: 제목 맨 앞에 키워드가 등장하면 주인공 인정
+                # 구제 조건: 제목 맨 처음에 키워드가 등장하면 해당 기사의 주인공으로 인정
                 query_pos = title.find(query)
-                if 0 <= query_pos <= 12: penalty_ratio = 0.8 # 경미한 페널티
-                else: penalty_ratio = 0.45 # 강력 페널티 (그룹A 10pt -> 4.5pt 시작)
+                if 0 <= query_pos <= 12: 
+                    penalty_ratio = 0.8 # 경미한 페널티
+                else: 
+                    penalty_ratio = 0.45 # 강력 페널티 (그룹A 10pt -> 약 4~6pt 사이로 조정)
             
             # 5) PICK 가중치 조건부 적용
             # 나열형 기사라면 네이버 PICK 기사여도 가중치를 적용하지 않음
@@ -234,21 +227,21 @@ def fetch_naver_article_info(link: str) -> dict:
 #  4. 수집 파이프라인
 # ══════════════════════════════════════════════════════════════
 
-def run_search(query: str, client_id: str, client_secret: str, progress_bar, days: int):
+def run_search(query: str, client_id: str, client_secret: str, progress_bar, start_dt, end_dt):
     naver_headers = {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
     kst = timezone(timedelta(hours=9))
-    now = datetime.now(kst)
-    since = now - timedelta(days=days)
-
+    
     raw_items = []
-    for start_index in [1, 101]:
+    # 충분한 표본 수집을 위해 페이지 확장
+    for start_index in range(1, 401, 100):
         url = f"https://openapi.naver.com/v1/search/news.json?query={query}&display=100&start={start_index}&sort=date"
         res = requests.get(url, headers=naver_headers, timeout=10)
-        if res.status_code != 200: return None
+        if res.status_code != 200: break
         items = res.json().get('items', [])
         for item in items:
             pub_date = datetime.strptime(item['pubDate'], '%a, %d %b %Y %H:%M:%S +0900').replace(tzinfo=kst)
-            if pub_date < since: break
+            if pub_date < start_dt: continue
+            if pub_date > end_dt: continue
             raw_items.append({"pub_date": pub_date, "link": item.get('link', ''), "title": clean_html_text(item.get('title', ''))})
     
     if not raw_items: return None
@@ -265,15 +258,16 @@ def run_search(query: str, client_id: str, client_secret: str, progress_bar, day
     news_data = []
     for idx, item in enumerate(raw_items):
         info = crawl_results.get(idx, {})
-        pub, pick = info.get("publisher", "기타"), info.get("pick", "")
+        pub, pick = info.get("publisher", "기타매체"), info.get("pick", "")
         group = GROUP_MAP.get(pub, "")
         
         base = WEIGHTS.get(group, 1.0)
         t_bonus = WEIGHTS["TITLE_BONUS"] if query.lower() in item["title"].lower() else 0.0
         
-        # 지능형 분석 엔진 호출
+        # 지능형 분석 엔진 호출 (본문 분석 + 페널티 산출)
         f_score, s_val, p_ratio, p_mult = analyze_article_content(item["link"], query, item["title"], (pick == "PICK"))
             
+        # 보정된 impact 산출 공식 적용
         impact = ((base * p_mult) + t_bonus + f_score) * p_ratio
         sent_label = "긍정" if s_val > 0.1 else ("부정" if s_val < -0.1 else "중립")
         
@@ -281,107 +275,118 @@ def run_search(query: str, client_id: str, client_secret: str, progress_bar, day
             "그룹": group, "매체명": pub, "제목": f'=HYPERLINK("{item["link"]}", "{item["title"]}")',
             "제목_표시": item["title"], "링크": item["link"], "PICK": pick,
             "게시일": item["pub_date"].strftime('%Y-%m-%d %H:%M'),
-            "영향력": round(impact, 2), "감성": sent_label,
-            "긍정점수": round(impact, 2) if sent_label == "긍정" else 0,
-            "부정점수": round(impact, 2) if sent_label == "부정" else 0
+            "pts": round(impact, 2), "감성": sent_label,
+            "긍정pts": round(impact, 2) if sent_label == "긍정" else 0,
+            "부정pts": round(impact, 2) if sent_label == "부정" else 0
         })
     return pd.DataFrame(news_data)
 
 # ══════════════════════════════════════════════════════════════
-#  5. UI 구성
+#  5. UI 구성 및 메인 렌더링
 # ══════════════════════════════════════════════════════════════
 
-st.set_page_config(page_title="영향력 & 리스크 뉴스 분석", layout="wide")
-st.title("🚀 글로벌 이슈 파급력 & 리스크 모니터링")
+st.set_page_config(page_title="영향력 & 리스크 뉴스 모니터링", layout="wide")
+st.title("🚀 이슈 파급력 & 리스크 모니터링")
+st.caption("매체력, 본문 집중도, 통합 기사 여부를 종합 분석하여 객관적인 파급력(pts)을 산출합니다.")
 
 with st.sidebar:
-    st.header("🔐 API 설정")
+    st.header("🔐 시스템 상태")
     try:
-        c_id = st.secrets["naver"]["client_id"]
-        c_secret = st.secrets["naver"]["client_secret"]
+        c_id = st.secrets["naver"]["client_id"]; c_secret = st.secrets["naver"]["client_secret"]
         st.success("API 서버 연결됨")
     except:
         st.error("Secrets 설정 확인 필요"); st.stop()
 
 st.divider()
-c1, c2, c3 = st.columns([2, 1, 1])
-with c1: query = st.text_input("검색 키워드", placeholder="예: 무신사")
-with c2: days = st.selectbox("기간", [1, 3, 7, 14], index=2, format_func=lambda x: f"최근 {x}일")
+c1, c2, c3 = st.columns([2, 2, 1])
+with c1: query = st.text_input("검색 키워드", placeholder="예: 무신사 서울숲")
+with c2: 
+    today = datetime.now()
+    date_range = st.date_input("검색 기간 설정", value=(today - timedelta(days=7), today), max_value=today)
 with c3: st.write(""); search_btn = st.button("🔍 데이터 분석 시작", type="primary", use_container_width=True)
 
 if search_btn and query:
-    pb = st.progress(0)
-    st.session_state["df"] = run_search(query, c_id, c_secret, pb, days)
+    if len(date_range) != 2: st.warning("시작일과 종료일을 모두 선택해주세요.")
+    else:
+        start_date, end_date = date_range
+        kst = timezone(timedelta(hours=9))
+        start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=kst)
+        end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=kst)
+        pb = st.progress(0)
+        st.session_state["df"] = run_search(query, c_id, c_secret, pb, start_dt, end_dt)
+        st.session_state["query_val"] = query
 
-if "df" in st.session_state:
+if "df" in st.session_state and st.session_state["df"] is not None:
     df = st.session_state["df"]
     
-    # ── 대시보드 요약 ──
+    # 상단 요약 요약
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("종합 파급력", f"{df['영향력'].sum():,.1f} pts")
-    m2.metric("기사당 평균", f"{df['영향력'].mean():.1f} pts")
-    m3.metric("🟢 호재 지수", f"{df['긍정점수'].sum():,.1f}")
-    m4.metric("🔴 리스크 지수", f"{df['부정점수'].sum():,.1f}", delta_color="inverse")
+    m1.metric("종합 파급력", f"{df['pts'].sum():,.1f} pts")
+    m2.metric("평균 영향력", f"{df['pts'].mean():.1f} pts")
+    m3.metric("🟢 호재 지수", f"{df['긍정pts'].sum():,.1f} pts")
+    m4.metric("🔴 리스크 지수", f"{df['부정pts'].sum():,.1f} pts", delta_color="inverse")
 
-    # ── 시각화 & 리스크 TOP 5 ──
+    # 대시보드 시각화 및 TOP 기사
     st.divider()
-    chart_col, list_col = st.columns([1.5, 1])
+    chart_col, rank_col = st.columns([1.5, 1])
     
     with chart_col:
         st.write("📊 **시간별 긍정/부정 파급력 추이 (pts)**")
-        fig = px.bar(df, x="게시일", y=["긍정점수", "부정점수"], 
-                     color_discrete_map={"긍정점수": "#2ecc71", "부정점수": "#e74c3c"})
+        fig = px.bar(df, x="게시일", y=["긍정pts", "부정pts"], 
+                     color_discrete_map={"긍정pts": "#2ecc71", "부정pts": "#e74c3c"})
         st.plotly_chart(fig, use_container_width=True)
 
-    with list_col:
+    with rank_col:
         st.write("🏆 **주요 기사 (Top 5)**")
-        for _, r in df.sort_values(by="영향력", ascending=False).head(5).iterrows():
-            st.caption(f"**[{r['영향력']}pt]** {r['매체명']}: {r['제목_표시']}")
+        for _, r in df.sort_values(by="pts", ascending=False).head(5).iterrows():
+            st.caption(f"**[{r['pts']}pts]** {r['매체명']}: {r['제목_표시']}")
         
         st.write("---")
         st.write("🚨 **최고 리스크 기사 (Top 5)**")
-        risky = df[df["감성"] == "부정"].sort_values(by="영향력", ascending=False).head(5)
+        risky = df[df["감성"] == "부정"].sort_values(by="pts", ascending=False).head(5)
         if not risky.empty:
-            for _, r in risky.iterrows():
-                st.warning(f"**[{r['영향력']}pt]** {r['매체명']}: {r['제목_표시']}")
-        else:
-            st.caption("수집된 리스크 기사가 없습니다.")
+            for _, r in risky.iterrows(): st.warning(f"**[{r['pts']}pts]** {r['매체명']}: {r['제목_표시']}")
+        else: st.caption("수집된 리스크 기사가 없습니다.")
 
-    # ── 상세 필터 리스트 ──
+    # 상세 필터 리스트
     st.divider()
     st.subheader("📂 뉴스 클리핑 상세 리스트")
     f1, f2, f3, f4 = st.columns([2, 1, 2, 1.5])
     with f1: sel_groups = st.multiselect("매체 그룹", options=["그룹 A", "그룹 B", "그룹 C", "미분류"], default=["그룹 A", "그룹 B", "그룹 C", "미분류"])
-    with f2: st.write(""); pick_only = st.checkbox("PICK 기사만")
+    with f2: st.write(""); pick_only = st.checkbox("PICK만 보기")
     with f3: sel_sents = st.multiselect("감성 필터", options=["긍정", "중립", "부정"], default=["긍정", "중립", "부정"])
-    with f4: sort_order = st.selectbox("정렬 기준", ["영향력 높은순", "최신순", "영향력 낮은순"])
+    with f4: sort_order = st.selectbox("정렬 기준", ["포인트 높은순", "최신순", "포인트 낮은순"])
 
-    # 필터 적용
+    # 필터 및 정렬 적용
     mask = pd.Series([True] * len(df), index=df.index)
-    mapped_groups = [("" if g == "미분류" else g) for g in sel_groups]
-    mask &= df["그룹"].isin(mapped_groups)
+    mapped_sel_groups = [("" if g == "미분류" else g) for g in sel_groups]
+    mask &= df["그룹"].isin(mapped_sel_groups)
     if pick_only: mask &= df["PICK"] == "PICK"
     mask &= df["감성"].isin(sel_sents)
     df_filtered = df[mask].copy()
 
-    # 정렬 적용
-    if sort_order == "영향력 높은순": df_filtered = df_filtered.sort_values(by="영향력", ascending=False)
-    elif sort_order == "영향력 낮은순": df_filtered = df_filtered.sort_values(by="영향력", ascending=True)
+    if sort_order == "포인트 높은순": df_filtered = df_filtered.sort_values(by="pts", ascending=False)
+    elif sort_order == "포인트 낮은순": df_filtered = df_filtered.sort_values(by="pts", ascending=True)
     else: df_filtered = df_filtered.sort_values(by="게시일", ascending=False)
 
-    # 테이블 렌더링
     def render_table(df_view):
         rows = ""
         for _, row in df_view.iterrows():
             badge = f'<span style="{GROUP_BADGE.get(row["그룹"], GROUP_BADGE[""])}">{row["그룹"] if row["그룹"] else "미분류"}</span>'
-            pick = '<span style="color:#e74c3c;font-weight:bold;">PICK</span>' if row["PICK"] == "PICK" else ""
-            sent_color = 'color:#e74c3c;font-weight:bold;' if row["감성"] == "부정" else ('color:#2ecc71;' if row["감성"] == "긍정" else '')
+            pick_icon = '<span style="color:#e74c3c;font-weight:bold;">PICK</span>' if row["PICK"] == "PICK" else ""
+            sent_style = 'color:#e74c3c;font-weight:bold;' if row["감성"] == "부정" else ('color:#2ecc71;' if row["감성"] == "긍정" else '')
             rows += f'<tr style="background:{GROUP_COLORS.get(row["그룹"], "#FFF")}; border-bottom:1px solid #eee;">' \
                     f'<td style="padding:10px;">{badge}</td><td>{row["매체명"]}</td>' \
                     f'<td><a href="{row["링크"]}" target="_blank" style="text-decoration:none; color:#1f1f1f;">{row["제목_표시"]}</a></td>' \
-                    f'<td style="text-align:center;">{pick}</td><td style="text-align:center; {sent_color}">{row["감성"]}</td>' \
-                    f'<td style="font-weight:bold;">{row["영향력"]}</td><td>{row["게시일"]}</td></tr>'
-        return f'<table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#f8f9fa; border-bottom:2px solid #dee2e6; text-align:left;"><th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>감성</th><th>영향력</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
+                    f'<td style="text-align:center;">{pick_icon}</td><td style="text-align:center; {sent_style}">{row["감성"]}</td>' \
+                    f'<td style="font-weight:bold;">{row["pts"]}</td><td>{row["게시일"]}</td></tr>'
+        return f'<table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#2C3E50; color:white; text-align:left;"><th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>감성</th><th>pts</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
 
     st.markdown(render_table(df_filtered), unsafe_allow_html=True)
+    
+    # 엑셀 다운로드
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_filtered[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
+    st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"analysis_{st.session_state.get('query_val', 'report')}.xlsx", type="primary", use_container_width=True)
