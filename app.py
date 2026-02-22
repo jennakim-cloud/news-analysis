@@ -10,71 +10,43 @@ from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 
-# --- [기존 설정값 및 가중치, 매핑 테이블 동일하게 유지] ---
-# ... (MAX_WORKERS, WEIGHTS, SENTIMENT_DICT, GROUP_MAP 등)
+# ══════════════════════════════════════════════════════════════
+#  1. 설정값 및 매핑 테이블
+# ══════════════════════════════════════════════════════════════
 
-# --- [기본 분석 함수 동일하게 유지] ---
-# ... (analyze_article_content, clean_html_text, run_search 등)
+MAX_WORKERS     = 10
+REQUEST_TIMEOUT = 6
+HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
 
-# --- 페이지 설정 ---
-st.set_page_config(page_title="영향력 & 리스크 뉴스 클리핑", layout="wide")
-st.title("🚀 글로벌 이슈 파급력 & 리스크 모니터링")
-st.caption("자동으로 연결된 네이버 API를 통해 실시간 데이터를 분석합니다.")
+WEIGHTS = {
+    "그룹 A": 10.0, "그룹 B": 5.0, "그룹 C": 2.0, "": 1.0,
+    "PICK_MULTIPLIER": 1.5, "TITLE_BONUS": 3.0
+}
 
-# 1. 사이드바 구성 (입력창 제거, 상태만 표시)
-with st.sidebar:
-    st.header("🔐 시스템 상태")
+SENTIMENT_DICT = {
+    "positive": ["성장", "흑자", "혁신", "인기", "급증", "돌풍", "1위", "상생", "호조", "성공", "확대", "유치"],
+    "negative": ["논란", "위기", "적자", "하락", "감소", "조사", "의혹", "비판", "중단", "우려", "갈등", "부진"]
+}
+
+GROUP_COLORS = {"그룹 A": "#D5F5E3", "그룹 B": "#FEF9E7", "그룹 C": "#FDEBD0", "": "#FFFFFF"}
+GROUP_BADGE = {
+    "그룹 A": "background:#D5F5E3; color:#1e7e34; padding:2px 8px; border-radius:4px; font-weight:bold;",
+    "그룹 B": "background:#FEF9E7; color:#856404; padding:2px 8px; border-radius:4px; font-weight:bold;",
+    "그룹 C": "background:#FDEBD0; color:#c05621; padding:2px 8px; border-radius:4px; font-weight:bold;",
+    "":       "color:#999; padding:2px 8px;",
+}
+
+# [주의] 매핑 테이블 데이터 (기존에 쓰시던 긴 리스트를 여기에 유지하세요)
+FIXED_MAP = {"apparelnews": "어패럴뉴스", "fashionbiz": "패션비즈", "byline": "바이라인네트워크"} 
+OID_MAP = {"001": "연합뉴스", "009": "매일경제", "015": "한국경제", "011": "서울경제", "023": "조선일보", "025": "중앙일보"}
+GROUP_MAP = {"매일경제": "그룹 A", "한국경제": "그룹 A", "서울경제": "그룹 A", "연합뉴스": "그룹 A", "어패럴뉴스": "그룹 A"}
+
+# ══════════════════════════════════════════════════════════════
+#  2. 분석 및 수집 함수
+# ══════════════════════════════════════════════════════════════
+
+def analyze_article_content(link, query):
+    if "naver.com" not in link: return 0.0, 0.0
     try:
-        # Secrets가 정상적으로 로드되는지 확인
-        client_id = st.secrets["naver"]["client_id"]
-        client_secret = st.secrets["naver"]["client_secret"]
-        st.success("API 서버에 연결되었습니다.")
-    except Exception as e:
-        st.error("Secrets 설정을 확인해주세요.")
-        st.stop() # 설정이 안 되어 있으면 앱 중단
-    
-    st.divider()
-    st.markdown("**리스크 관리 사전**")
-    st.caption(f"호재 키워드: {', '.join(SENTIMENT_DICT['positive'][:5])}...")
-    st.caption(f"위기 키워드: {', '.join(SENTIMENT_DICT['negative'][:5])}...")
-
-# 2. 메인 UI 구성 (검색창 상단 고정)
-st.divider()
-col1, col2, col3 = st.columns([3, 1, 1])
-with col1:
-    query = st.text_input("검색 키워드 입력", placeholder="예: 무신사, K-패션")
-with col2:
-    days = st.selectbox("검색 기간", options=[1, 3, 7, 14, 30], index=2, format_func=lambda x: f"최근 {x}일")
-with col3:
-    st.write("") # 간격 맞춤용
-    search_button = st.button("🔍 데이터 분석 시작", use_container_width=True, type="primary")
-
-# 3. 실행 로직 (자동으로 client_id, client_secret 전달)
-if search_button:
-    if not query:
-        st.warning("키워드를 입력해주세요.")
-    else:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        # run_search 함수 실행 (인증 정보를 자동으로 st.secrets에서 가져와 전달)
-        with st.spinner(f"'{query}'에 대한 글로벌 파급력 분석 중..."):
-            df = run_search(
-                query=query.strip(),
-                client_id=st.secrets["naver"]["client_id"],
-                client_secret=st.secrets["naver"]["client_secret"],
-                progress_bar=progress_bar,
-                status_text=status_text,
-                days=days
-            )
-            
-            if df is not None and not df.empty:
-                st.session_state["df"] = df
-                st.session_state["query"] = query
-                st.success("분석이 완료되었습니다!")
-            else:
-                st.error("검색 결과가 없거나 오류가 발생했습니다.")
-
-# 4. 결과 대시보드 표시 (기존 코드 유지)
-if "df" in st.session_state:
-    # ... (대시보드 시각화 및 테이블 렌더링 로직)
+        res = requests.get(link, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        soup =
