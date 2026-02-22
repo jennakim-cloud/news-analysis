@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 
 # ══════════════════════════════════════════════════════════════
-#  1. 설정값 및 가중치 사전
+#  1. 설정값 및 가중치 사전 (단위: pts)
 # ══════════════════════════════════════════════════════════════
 
 MAX_WORKERS     = 10
@@ -37,7 +37,7 @@ GROUP_BADGE = {
 }
 
 # ══════════════════════════════════════════════════════════════
-#  2. 매핑 테이블 (공유해주신 데이터 기반 통합)
+#  2. 매핑 테이블 (기존 데이터 유지)
 # ══════════════════════════════════════════════════════════════
 
 FIXED_MAP = {
@@ -242,11 +242,13 @@ def run_search(query, client_id, client_secret, progress_bar, days):
             f_score, s_val = analyze_article_content(item["link"], query)
         impact = (base * mult) + t_bonus + f_score
         sent = "긍정" if s_val > 0.1 else ("부정" if s_val < -0.1 else "중립")
+        
+        # pts 단위로 저장
         news_data.append({
             "그룹": group, "매체명": pub, "제목": f'=HYPERLINK("{item["link"]}", "{item["title"]}")',
             "제목_표시": item["title"], "링크": item["link"], "PICK": pick,
-            "게시일": item["pub_date"].strftime('%Y-%m-%d %H:%M'), "포인트": round(impact, 2), "감성": sent,
-            "긍정포인트": round(impact, 2) if sent == "긍정" else 0, "부정포인트": round(impact, 2) if sent == "부정" else 0
+            "게시일": item["pub_date"].strftime('%Y-%m-%d %H:%M'), "pts": round(impact, 2), "감성": sent,
+            "긍정pts": round(impact, 2) if sent == "긍정" else 0, "부정pts": round(impact, 2) if sent == "부정" else 0
         })
     return pd.DataFrame(news_data)
 
@@ -254,7 +256,7 @@ def run_search(query, client_id, client_secret, progress_bar, days):
 #  4. 메인 UI 및 실행
 # ══════════════════════════════════════════════════════════════
 
-st.set_page_config(page_title="영향력 & 리스크 분석", layout="wide")
+st.set_page_config(page_title="글로벌 이슈 분석", layout="wide")
 st.title("🚀 글로벌 이슈 파급력 & 리스크 모니터링")
 
 with st.sidebar:
@@ -270,36 +272,36 @@ st.divider()
 c1, c2, c3 = st.columns([3, 1, 1])
 with c1: query = st.text_input("검색 키워드", placeholder="예: 무신사")
 with c2: days = st.selectbox("기간", [1, 3, 7, 14], index=2, format_func=lambda x: f"최근 {x}일")
-with c3: st.write(""); search_btn = st.button("🔍 분석 시작", type="primary", use_container_width=True)
+with c3: st.write(""); search_btn = st.button("🔍 데이터 분석 시작", type="primary", use_container_width=True)
 
 if search_btn and query:
     pb = st.progress(0)
     st.session_state["df"] = run_search(query, c_id, c_secret, pb, days)
 
-# ── 결과 대시보드 및 리스트 표시 구역 ──
+# ── 결과 표시 구역 ──
 if "df" in st.session_state and st.session_state["df"] is not None:
     df = st.session_state["df"]
-    st.divider()
     
     # 1. 지표 요약
+    st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("종합 파급력", f"{df['포인트'].sum():,.1f} 포인트")
-    m2.metric("평균 영향력", f"{df['포인트'].mean():.1f} 포인트")
-    m3.metric("🟢 호재 지수", f"{df['긍정포인트'].sum():,.1f}")
-    m4.metric("🔴 리스크 지수", f"{df['부정포인트'].sum():,.1f}", delta_color="inverse")
+    m1.metric("종합 파급력", f"{df['pts'].sum():,.1f} pts")
+    m2.metric("평균 영향력", f"{df['pts'].mean():.1f} pts")
+    m3.metric("🟢 호재 지수", f"{df['긍정pts'].sum():,.1f} pts")
+    m4.metric("🔴 리스크 지수", f"{df['부정pts'].sum():,.1f} pts", delta_color="inverse")
 
     # 2. 시각화 추이
     st.divider()
     lc, rc = st.columns([1.5, 1])
     with lc:
-        st.write("📊 시간별 파급력 추이")
-        st.plotly_chart(px.bar(df, x="게시일", y=["긍정포인트", "부정포인트"], color_discrete_map={"긍정포인트": "#2ecc71", "부정포인트": "#e74c3c"}), use_container_width=True)
+        st.write("📊 시간별 파급력 추이 (pts)")
+        st.plotly_chart(px.bar(df, x="게시일", y=["긍정pts", "부정pts"], color_discrete_map={"긍정pts": "#2ecc71", "부정pts": "#e74c3c"}), use_container_width=True)
     with rc:
-        st.write("🏆 최고 포인트 기사 (Top 5)")
-        for _, r in df.sort_values("포인트", ascending=False).head(5).iterrows():
-            st.caption(f"**[{r['포인트']}p]** {r['매체명']} | {r['제목_표시']}")
+        st.write("🏆 최고 pts 기사 (Top 5)")
+        for _, r in df.sort_values("pts", ascending=False).head(5).iterrows():
+            st.caption(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
 
-    # 3. 뉴스 클리핑 상세 리스트 (들여쓰기 주의!)
+    # 3. 상세 리스트 테이블
     st.divider()
     st.subheader("📂 뉴스 클리핑 상세 리스트 (그룹 A/B/C)")
 
@@ -311,10 +313,10 @@ if "df" in st.session_state and st.session_state["df"] is not None:
             rows += f'<tr style="background:{GROUP_COLORS.get(row["그룹"], "#FFF")}; border-bottom:1px solid #eee;">' \
                     f'<td style="padding:10px;">{badge}</td><td>{row["매체명"]}</td>' \
                     f'<td><a href="{row["링크"]}" target="_blank" style="text-decoration:none; color:#1f1f1f;">{row["제목_표시"]}</a></td>' \
-                    f'<td style="text-align:center;">{pick}</td><td style="font-weight:bold;">{row["포인트"]}</td><td>{row["게시일"]}</td></tr>'
+                    f'<td style="text-align:center;">{pick}</td><td style="font-weight:bold;">{row["pts"]}</td><td>{row["게시일"]}</td></tr>'
         return f'<table style="width:100%; border-collapse:collapse;"><thead>' \
                f'<tr style="background:#f8f9fa; border-bottom:2px solid #dee2e6; text-align:left;">' \
-               f'<th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>포인트</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
+               f'<th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>pts</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
 
     st.markdown(render_table(df), unsafe_allow_html=True)
 
@@ -322,5 +324,5 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     st.divider()
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df[["그룹", "매체명", "제목", "PICK", "게시일", "포인트", "감성"]].to_excel(writer, index=False)
-    st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"analysis_{query}.xlsx", type="primary", use_container_width=True)
+        df[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
+    st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"
