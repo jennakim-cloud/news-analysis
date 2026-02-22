@@ -317,11 +317,22 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     st.divider()
     st.subheader("📂 뉴스 클리핑 리스트 (그룹 A/B/C)")
     
-    def render_table(df_view):
+   def render_table(df_view):
         rows = ""
         for _, row in df_view.iterrows():
             badge = f'<span style="{GROUP_BADGE.get(row["그룹"], GROUP_BADGE[""])}">{row["그룹"] if row["그룹"] else "미분류"}</span>'
             pick = '<span style="color:#e74c3c;font-weight:bold;">PICK</span>' if row["PICK"] == "PICK" else ""
             rows += f'<tr style="background:{GROUP_COLORS.get(row["그룹"], "#FFF")}; border-bottom:1px solid #eee;">' \
                     f'<td style="padding:10px;">{badge}</td><td>{row["매체명"]}</td>' \
-                    f
+                    f'<td><a href="{row["링크"]}" target="_blank" style="text-decoration:none; color:#1f1f1f;">{row["제목_표시"]}</a></td>' \
+                    f'<td style="text-align:center;">{pick}</td><td style="font-weight:bold;">{row["포인트"]}</td><td>{row["게시일"]}</td></tr>'
+        return f'<table style="width:100%; border-collapse:collapse;"><thead>' \
+               f'<tr style="background:#f8f9fa; border-bottom:2px solid #dee2e6;"><th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>포인트</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
+
+    st.markdown(render_table(df), unsafe_allow_html=True)
+
+    # 엑셀 다운로드
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df[["그룹", "매체명", "제목", "PICK", "게시일", "포인트", "감성"]].to_excel(writer, index=False)
+    st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"news_analysis.xlsx", type="primary", use_container_width=True)
