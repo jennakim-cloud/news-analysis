@@ -217,7 +217,7 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
 
 # 4. UI 프레임워크
 st.set_page_config(page_title="글로벌 뉴스 분석", layout="wide")
-st.title("🚀 글로벌 이슈 파급력 & 리스크 모니터링")
+st.title("🚀 이슈 파급력 & 리스크 모니터링")
 
 with st.sidebar:
     st.header("🔐 시스템 상태")
