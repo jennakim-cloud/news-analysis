@@ -10,7 +10,9 @@ from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 
-# 1. 설정값 및 가중치 사전
+# ══════════════════════════════════════════════════════════════
+#  1. 설정값 및 가중치 사전 (pts 기준)
+# ══════════════════════════════════════════════════════════════
 MAX_WORKERS     = 10
 REQUEST_TIMEOUT = 6
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
@@ -33,7 +35,9 @@ GROUP_BADGE = {
     "":       "color:#999; padding:2px 8px;",
 }
 
-# 2. 사용자 제공 매핑 테이블
+# ══════════════════════════════════════════════════════════════
+#  2. 사용자 제공 매핑 테이블 (전체 데이터)
+# ══════════════════════════════════════════════════════════════
 FIXED_MAP = {
     "1conomynews": "1코노미뉴스", "cctimes": "충청타임즈", "chungnamilbo": "충남일보", "dtnews24": "대전뉴스",
     "enetnews": "이넷뉴스", "financialreview": "파이낸셜리뷰", "globalepic": "글로벌에픽", "gokorea": "고코리아",
@@ -51,7 +55,7 @@ FIXED_MAP = {
     "ilyo": "일요신문", "hankooki": "스포츠한국", "ezyeconomy": "이지경제", "enewstoday": "이뉴스투데이",
     "ekn": "에너지경제", "dizzotv": "디지틀조선일보", "cstimes": "컨슈머타임스", "consumernews": "소비자가만드는신문",
     "ceoscoredaily": "CEO스코어데일리", "breaknews": "브레이크뉴스", "bizwnews": "비즈월드", "beyondpost": "비욘드포스트",
-    "asiatime": "아시아타임즈", "apnews": "아시아에이", "biz": "뉴데일리", "viva100": "브릿지경제",
+    "asiatime": "아시아타임즈", "apnews": "ap뉴스", "biz": "뉴데일리", "viva100": "브릿지경제",
     "srtimes": "SR타임스", "kpenews": "한국정경신문", "news2day": "뉴스투데이", "fashionbiz": "패션비즈",
     "econovill": "이코노믹리뷰", "businessplus": "비즈니스플러스", "newspim": "뉴스핌", "m-i": "매일일보",
     "pointdaily": "포인트데일리", "ajunews": "아주경제", "asiatoday": "아시아투데이", "xportsnews": "엑스포츠뉴스",
@@ -65,7 +69,7 @@ FIXED_MAP = {
     "ziksir": "직썰", "job-post": "잡포스트", "issuenbiz": "이슈앤비즈", "fashionn": "패션엔",
     "thebell": "더벨", "ftoday": "파이낸셜투데이", "newspost": "뉴스포스트", "econonews": "이코노뉴스",
     "thevaluenews": "더밸류뉴스", "megaeconomy": "메가경제", "greened": "녹색경제신문",
-    "sisajournal-e": "시사저널이코노미", "digitaltoday": "디지털투데이"
+    "sisajournal-e": "시사저널이코노미", "digitaltoday": "디지털투데이", "asisaa": "아시아에이",
 }
 
 OID_MAP = {
@@ -91,7 +95,7 @@ GROUP_MAP = {
     "공공뉴스":"그룹 B","국민일보":"그룹 A","국제섬유신문":"그룹 A","굿모닝경제":"그룹 C","남다른디테일":"그룹 B",
     "내일신문":"그룹 A","녹색경제신문":"그룹 C","뉴데일리":"그룹 A","뉴스1":"그룹 A","뉴스워치":"그룹 C",
     "뉴스워커":"그룹 C","뉴스웨이":"그룹 B","뉴스인사이드":"그룹 C","뉴스저널리즘":"그룹 B","뉴스토마토":"그룹 C",
-    "뉴스톱":"그룹 B","뉴스투데이":"그룹 B","뉴스포스트":"그룹 C","뉴스핌":"그룹 A","뉴시스":"그룹 A","뉴시안":"그룹 C",
+    "뉴스톱":"그룹 B","뉴스투데이":"그룹 B","뉴스포스트":"그룹 C","뉴스핌":"그룹 A","뉴시스":"그룹 A","뉴시ian":"그룹 C",
     "대한경제":"그룹 B","더리브스":"그룹 C","더밸류뉴스":"그룹 B","더벨":"그룹 B","더스쿠프":"그룹 B","더스탁":"그룹 B",
     "더팩트":"그룹 A","더피알":"그룹 C","데일리안":"그룹 A","데일리한국":"그룹 A","동아닷컴":"그룹 C","동아일보":"그룹 A",
     "동행미디어 시대":"그룹 A","디지털데일리":"그룹 A","디지털타임스":"그룹 A","디지털투데이":"그룹 B",
@@ -124,7 +128,9 @@ GROUP_MAP = {
     "현대경제신문":"그룹 C","후지TV":"그룹 C","MTN":"그룹 A",
 }
 
-# 3. 분석 및 크롤링 엔진
+# ══════════════════════════════════════════════════════════════
+#  3. 수집 및 분석 엔진
+# ══════════════════════════════════════════════════════════════
 def analyze_article_content(link, query):
     if "naver.com" not in link: return 0.0, 0.0
     try:
@@ -215,7 +221,9 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
         })
     return pd.DataFrame(news_data)
 
-# 4. UI 프레임워크
+# ══════════════════════════════════════════════════════════════
+#  4. UI 프레임워크 (검색 및 대시보드)
+# ══════════════════════════════════════════════════════════════
 st.set_page_config(page_title="글로벌 뉴스 분석", layout="wide")
 st.title("🚀 이슈 파급력 & 리스크 모니터링")
 
@@ -248,8 +256,13 @@ if search_btn and query:
         st.session_state["df"] = run_search(query, c_id, c_secret, pb, start_dt, end_dt)
         st.session_state["query_val"] = query
 
+# ══════════════════════════════════════════════════════════════
+#  5. 필터 및 결과 리스트 (통합 섹션)
+# ══════════════════════════════════════════════════════════════
 if "df" in st.session_state and st.session_state["df"] is not None:
     df = st.session_state["df"]
+    
+    # 5-1. 대시보드 지표
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("종합 파급력", f"{df['pts'].sum():,.1f} pts")
@@ -257,6 +270,7 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     m3.metric("🟢 호재 지수", f"{df['긍정pts'].sum():,.1f} pts")
     m4.metric("🔴 리스크 지수", f"{df['부정pts'].sum():,.1f} pts", delta_color="inverse")
 
+    # 5-2. 차트 및 랭킹
     st.divider()
     lc, rc = st.columns([1.5, 1])
     with lc:
@@ -276,8 +290,41 @@ if "df" in st.session_state and st.session_state["df"] is not None:
         else:
             st.caption("수집된 리스크 기사가 없습니다.")
 
+    # 5-3. 필터 및 정렬 상세 리스트
     st.divider()
     st.subheader("📂 뉴스 클리핑 상세 리스트 (그룹 A/B/C)")
+
+    f_col1, f_col2, f_col3, f_col4 = st.columns([2, 1, 2, 1.5])
+    with f_col1:
+        group_opt = ["그룹 A", "그룹 B", "그룹 C", "미분류"]
+        sel_groups = st.multiselect("매체 그룹", options=group_opt, default=group_opt)
+    with f_col2:
+        st.write("") 
+        pick_only = st.checkbox("PICK만 보기")
+    with f_col3:
+        sent_opt = ["긍정", "중립", "부정"]
+        sel_sents = st.multiselect("감성 필터", options=sent_opt, default=sent_opt)
+    with f_col4:
+        sort_by = st.selectbox("정렬 기준", ["포인트 높은순", "최신순", "포인트 낮은순"])
+
+    # 필터 적용
+    mask = pd.Series([True] * len(df), index=df.index)
+    mapped_sel_groups = [("" if g == "미분류" else g) for g in sel_groups]
+    mask &= df["그룹"].isin(mapped_sel_groups)
+    if pick_only: mask &= df["PICK"] == "PICK"
+    mask &= df["감성"].isin(sel_sents)
+
+    df_filtered = df[mask].copy()
+
+    # 정렬 적용
+    if sort_by == "포인트 높은순":
+        df_filtered = df_filtered.sort_values(by="pts", ascending=False)
+    elif sort_by == "포인트 낮은순":
+        df_filtered = df_filtered.sort_values(by="pts", ascending=True)
+    else:
+        df_filtered = df_filtered.sort_values(by="게시일", ascending=False)
+
+    st.caption(f"필터 결과: {len(df_filtered)}건")
 
     def render_table(df_view):
         rows = ""
@@ -293,9 +340,10 @@ if "df" in st.session_state and st.session_state["df"] is not None:
                     f'<td style="font-weight:bold;">{row["pts"]}</td><td>{row["게시일"]}</td></tr>'
         return f'<table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#2C3E50; color:white; text-align:left;"><th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>감성</th><th>pts</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
 
-    st.markdown(render_table(df), unsafe_allow_html=True)
+    st.markdown(render_table(df_filtered), unsafe_allow_html=True)
 
+    # 엑셀 다운로드
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
+        df_filtered[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
     st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"analysis_{st.session_state.get('query_val', 'report')}.xlsx", type="primary", use_container_width=True)
