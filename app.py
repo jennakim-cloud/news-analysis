@@ -325,4 +325,4 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
-    st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"
+    st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"analysis_{query}.xlsx", type="primary", use_container_width=True)
