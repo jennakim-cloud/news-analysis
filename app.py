@@ -133,7 +133,6 @@ GROUP_MAP = {
     "한국일보":"그룹 A","한국정경신문":"그룹 C","한스경제":"그룹 B","허프포스트":"그룹 C","헤럴드경제":"그룹 A",
     "현대경제신문":"그룹 C","후지TV":"그룹 C","MTN":"그룹 A",
 }
-
 # ══════════════════════════════════════════════════════════════
 #  3. 핵심 분석 엔진 (외부 매체 크롤링 보완)
 # ══════════════════════════════════════════════════════════════
@@ -239,5 +238,107 @@ def run_search(query, client_id, client_secret, progress_bar, days):
             "긍정pts": round(impact, 2) if sent == "긍정" else 0, "부정pts": round(impact, 2) if sent == "부정" else 0
         })
     return pd.DataFrame(news_data)
+# ══════════════════════════════════════════════════════════════
+#  4. UI 프레임워크 및 렌더링
+# ══════════════════════════════════════════════════════════════
+st.set_page_config(page_title="영향력 분석 시스템", layout="wide")
+st.title("🚀 이슈 파급력 & 리스크 모니터링")
+st.caption("제목 및 본문을 바탕으로 해당 키워드의 파급력을 포인트로 산출합니다. 매체 그룹, PICK 여부를 기준으로 1차 가중치를 부여하며, 업계 종합 단신 기사에는 -5포인트 패널티가 적용됩니다. 긍부정은 기사 내에 포함된 키워드를 기반으로 분석합니다.")
 
-# [UI 파트 - 기존 코드와 동일하게 유지]
+
+with st.sidebar:
+    st.header("🔐 시스템 상태")
+    try:
+        c_id = st.secrets["naver"]["client_id"]; c_secret = st.secrets["naver"]["client_secret"]
+        st.success("API 서버 연결됨")
+    except:
+        st.error("Secrets 설정 확인 필요"); st.stop()
+
+st.divider()
+c1, c2, c3 = st.columns([2, 2, 1])
+with c1: query = st.text_input("검색 키워드", placeholder="예: 무신사")
+with c2: 
+    today = datetime.now()
+    date_range = st.date_input("검색 기간 설정", value=(today - timedelta(days=7), today), max_value=today)
+with c3: st.write(""); search_btn = st.button("🔍 분석 시작", type="primary", use_container_width=True)
+
+if search_btn and query:
+    if len(date_range) != 2: st.warning("시작일과 종료일을 모두 선택해주세요.")
+    else:
+        start_date, end_date = date_range
+        kst = timezone(timedelta(hours=9))
+        start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=kst)
+        end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=kst)
+        pb = st.progress(0)
+        st.session_state["df"] = run_search(query, c_id, c_secret, pb, start_dt, end_dt)
+        st.session_state["query_val"] = query
+
+if "df" in st.session_state and st.session_state["df"] is not None:
+    df = st.session_state["df"]
+    
+    # 상단 요약 지표
+    st.divider()
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("종합 파급력", f"{df['pts'].sum():,.1f} pts")
+    m2.metric("평균 영향력", f"{df['pts'].mean():.1f} pts")
+    m3.metric("🟢 호재 지수", f"{df['긍정pts'].sum():,.1f} pts")
+    m4.metric("🔴 리스크 지수", f"{df['부정pts'].sum():,.1f} pts", delta_color="inverse")
+
+    # 대시보드 시각화
+    st.divider()
+    lc, rc = st.columns([1.5, 1])
+    with lc:
+        st.write("📊 기간 내 파급력 추이 (pts)")
+        st.plotly_chart(px.bar(df, x="게시일", y=["긍정pts", "부정pts"], color_discrete_map={"긍정pts": "#2ecc71", "부정pts": "#e74c3c"}), use_container_width=True)
+    with rc:
+        st.write("🏆 주요 기사 (Top 5)")
+        for _, r in df.sort_values("pts", ascending=False).head(5).iterrows():
+            st.caption(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
+        st.write("---")
+        st.write("🚨 리스크 기사 (Top 5)")
+        risk_top5 = df[df["감성"] == "부정"].sort_values("pts", ascending=False).head(5)
+        if not risk_top5.empty:
+            for _, r in risk_top5.iterrows(): st.warning(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
+        else: st.caption("수집된 리스크 기사가 없습니다.")
+
+    # 상세 리스트 및 필터
+    st.divider()
+    st.subheader("📂 뉴스 클리핑 상세 리스트")
+    f1, f2, f3, f4 = st.columns([2, 1, 2, 1.5])
+    with f1: sel_groups = st.multiselect("매체 그룹", options=["그룹 A", "그룹 B", "그룹 C", "미분류"], default=["그룹 A", "그룹 B", "그룹 C", "미분류"])
+    with f2: st.write(""); pick_only = st.checkbox("PICK만 보기")
+    with f3: sel_sents = st.multiselect("감성 필터", options=["긍정", "중립", "부정"], default=["긍정", "중립", "부정"])
+    with f4: sort_by = st.selectbox("정렬 기준", ["포인트 높은순", "최신순", "포인트 낮은순"])
+
+    # 필터 및 정렬 적용
+    mask = pd.Series([True] * len(df), index=df.index)
+    mapped_sel_groups = [("" if g == "미분류" else g) for g in sel_groups]
+    mask &= df["그룹"].isin(mapped_sel_groups)
+    if pick_only: mask &= df["PICK"] == "PICK"
+    mask &= df["감성"].isin(sel_sents)
+    df_filtered = df[mask].copy()
+
+    if sort_by == "포인트 높은순": df_filtered = df_filtered.sort_values(by="pts", ascending=False)
+    elif sort_by == "포인트 낮은순": df_filtered = df_filtered.sort_values(by="pts", ascending=True)
+    else: df_filtered = df_filtered.sort_values(by="게시일", ascending=False)
+
+    def render_table(df_view):
+        rows = ""
+        for _, row in df_view.iterrows():
+            badge = f'<span style="{GROUP_BADGE.get(row["그룹"], GROUP_BADGE[""])}">{row["그룹"] if row["그룹"] else "미분류"}</span>'
+            pick = '<span style="color:#e74c3c;font-weight:bold;">PICK</span>' if row["PICK"] == "PICK" else ""
+            sent_style = 'color:#e74c3c;font-weight:bold;' if row["감성"] == "부정" else ('color:#2ecc71;' if row["감성"] == "긍정" else '')
+            rows += f'<tr style="background:{GROUP_COLORS.get(row["그룹"], "#FFF")}; border-bottom:1px solid #eee;">' \
+                    f'<td style="padding:10px;">{badge}</td><td>{row["매체명"]}</td>' \
+                    f'<td><a href="{row["링크"]}" target="_blank" style="text-decoration:none; color:#1f1f1f;">{row["제목_표시"]}</a></td>' \
+                    f'<td style="text-align:center;">{pick}</td><td style="text-align:center; {sent_style}">{row["감성"]}</td>' \
+                    f'<td style="font-weight:bold;">{row["pts"]}</td><td>{row["게시일"]}</td></tr>'
+        return f'<table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#2C3E50; color:white; text-align:left;"><th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>감성</th><th>pts</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
+
+    st.markdown(render_table(df_filtered), unsafe_allow_html=True)
+    
+    # 엑셀 다운로드
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_filtered[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
+    st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"analysis_{st.session_state.get('query_val', 'report')}.xlsx", type="primary", use_container_width=True)
