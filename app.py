@@ -265,7 +265,8 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
 #  4. UI 프레임워크 및 렌더링
 # ══════════════════════════════════════════════════════════════
 st.set_page_config(page_title="이슈 모니터링 시스템", layout="wide")
-st.title("🚀 이슈 파격력 & 리스크 모니터링")
+st.title("🚀 이슈 파력 & 리스크 모니터링")
+st.caption("제목 및 본문을 바탕으로 해당 키워드의 파급력을 포인트로 산출합니다. 매체 그룹, PICK 여부를 기준으로 1차 가중치를 부여하며, 업계 종합 단신 기사에는 -5포인트 패널티가 적용됩니다. 긍부정은 기사 내에 포함된 키워드를 기반으로 분석합니다.")
 
 with st.sidebar:
     st.header("🔐 시스템 상태")
