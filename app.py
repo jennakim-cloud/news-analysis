@@ -10,10 +10,7 @@ from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 
-# ══════════════════════════════════════════════════════════════
-#  1. 설정값 및 가중치 사전
-# ══════════════════════════════════════════════════════════════
-
+# 1. 설정값 및 가중치 사전
 MAX_WORKERS     = 10
 REQUEST_TIMEOUT = 6
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
@@ -36,10 +33,7 @@ GROUP_BADGE = {
     "":       "color:#999; padding:2px 8px;",
 }
 
-# ══════════════════════════════════════════════════════════════
-#  2. 사용자 제공 매핑 테이블 통합
-# ══════════════════════════════════════════════════════════════
-
+# 2. 사용자 제공 매핑 테이블
 FIXED_MAP = {
     "1conomynews": "1코노미뉴스", "cctimes": "충청타임즈", "chungnamilbo": "충남일보", "dtnews24": "대전뉴스",
     "enetnews": "이넷뉴스", "financialreview": "파이낸셜리뷰", "globalepic": "글로벌에픽", "gokorea": "고코리아",
@@ -117,9 +111,10 @@ GROUP_MAP = {
     "월요신문":"그룹 B","위키리크스한국":"그룹 B","위키트리":"그룹 C","이뉴스투데이":"그룹 B","이데일리":"그룹 A",
     "이코노미스트":"그룹 B","이코노믹리뷰":"그룹 B","이투데이":"그룹 A","인베스트조선":"그룹 B","인사이트":"그룹 C",
     "인사이트코리아":"그룹 B","일간스포츠":"그룹 B","일요서울":"그룹 C","일요신문":"그룹 C","전자신문":"그룹 A",
-    "조선비즈":"그룹 A","조선일보":"그룹 A","주간한국":"그룹 B","중소기업신문":"그룹 C","중앙선데이":"그룹 A",
-    "중앙이코노미뉴스":"그룹 C","중앙일보":"그룹 A","지디넷코리아":"그룹 A","청년일보":"그룹 C","커넥터스":"그룹 C",
-    "컨슈머타임즈":"그룹 B","코리아중앙데일리":"그룹 A","코리아타임스":"그룹 A","코리아헤럴드":"그룹 A","쿠키뉴스":"그룹 A",
+    "조선비즈":"그룹 A","조선일보":"그룹 A","주간한국":"그룹 B","중소기업신문":"그룹 C",
+    "중앙선데이":"그룹 A","중앙이코노미뉴스":"그룹 C","중앙일보":"그룹 A",
+    "지디넷코리아":"그룹 A","청년일보":"그룹 C","커넥터스":"그룹 C","컨슈머타임즈":"그룹 B",
+    "코리아중앙데일리":"그룹 A","코리아타임스":"그룹 A","코리아헤럴드":"그룹 A","쿠키뉴스":"그룹 A",
     "테넌트뉴스":"그룹 A","테크엠":"그룹 A","토요경제":"그룹 C","톱데일리":"그룹 B","투데이신문":"그룹 B",
     "투데이코리아":"그룹 C","파이낸셜뉴스":"그룹 A","파이낸셜리뷰":"그룹 C","파이낸셜투데이":"그룹 C",
     "파이낸셜포스트":"그룹 C","팝콘뉴스":"그룹 C","패션비즈":"그룹 A","패션인사이트":"그룹 A","패션포스트":"그룹 A",
@@ -129,10 +124,7 @@ GROUP_MAP = {
     "현대경제신문":"그룹 C","후지TV":"그룹 C","MTN":"그룹 A",
 }
 
-# ══════════════════════════════════════════════════════════════
-#  3. 수집 및 분석 엔진
-# ══════════════════════════════════════════════════════════════
-
+# 3. 분석 및 크롤링 엔진
 def analyze_article_content(link, query):
     if "naver.com" not in link: return 0.0, 0.0
     try:
@@ -150,14 +142,11 @@ def analyze_article_content(link, query):
     return 0.0, 0.0
 
 def publisher_from_url(link):
-    # 1단계: 네이버 언론사 코드(OID) 매핑 확인
     if "naver.com" in link:
         m = re.search(r'article/(\d+)/', link)
         if m:
             oid = m.group(1).zfill(3)
             if oid in OID_MAP: return OID_MAP[oid]
-            
-    # 2단계: 도메인 기반 FIXED_MAP 확인
     try:
         domain = link.split('//')[-1].split('/')[0].lower()
         domain = re.sub(r'^(www\.|n\.|news\.|m\.|blog\.|sports\.)', '', domain)
@@ -172,10 +161,8 @@ def fetch_naver_article_info(link):
     try:
         res = requests.get(link, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         soup = BeautifulSoup(res.text, 'html.parser')
-        # 매체명 크롤링 보완
         logo = soup.select_one('a.press_logo img, .media_end_head_top a img')
         if logo: res_info["publisher"] = logo.get('alt', '').strip()
-        # PICK 여부
         if soup.select_one('.is_pick, .media_end_head_journalist_edit_label') or "PICK" in res.text:
             res_info["pick"] = "PICK"
     except: pass
@@ -185,7 +172,6 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
     naver_headers = {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
     kst = timezone(timedelta(hours=9))
     raw_items = []
-    
     stop_searching = False
     for start_index in range(1, 1001, 100):
         if stop_searching: break
@@ -194,7 +180,6 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
         if res.status_code != 200: return None
         items = res.json().get('items', [])
         if not items: break
-        
         for item in items:
             pub_date = datetime.strptime(item['pubDate'], '%a, %d %b %Y %H:%M:%S +0900').replace(tzinfo=kst)
             if pub_date > end_dt: continue 
@@ -202,9 +187,7 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
                 stop_searching = True
                 break
             raw_items.append({"pub_date": pub_date, "link": item.get('link', ''), "title": html.unescape(re.sub(r'<[^>]*>', '', item.get('title', '')))})
-    
     if not raw_items: return None
-    
     crawl_results = {}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_idx = {executor.submit(fetch_naver_article_info, item["link"]): idx for idx, item in enumerate(raw_items)}
@@ -212,7 +195,6 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
             idx = future_to_idx[future]
             crawl_results[idx] = future.result()
             progress_bar.progress(int((i+1)/len(raw_items) * 70))
-
     news_data = []
     for idx, item in enumerate(raw_items):
         info = crawl_results.get(idx, {})
@@ -233,12 +215,9 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
         })
     return pd.DataFrame(news_data)
 
-# ══════════════════════════════════════════════════════════════
-#  4. UI 프레임워크
-# ══════════════════════════════════════════════════════════════
-
-st.set_page_config(page_title="뉴스 분석", layout="wide")
-st.title("📰 이슈 파급력 & 리스크 모니터링")
+# 4. UI 프레임워크
+st.set_page_config(page_title="글로벌 뉴스 분석", layout="wide")
+st.title("🚀 글로벌 이슈 파급력 & 리스크 모니터링")
 
 with st.sidebar:
     st.header("🔐 시스템 상태")
@@ -284,9 +263,18 @@ if "df" in st.session_state and st.session_state["df"] is not None:
         st.write("📊 기간 내 파급력 추이 (pts)")
         st.plotly_chart(px.bar(df, x="게시일", y=["긍정pts", "부정pts"], color_discrete_map={"긍정pts": "#2ecc71", "부정pts": "#e74c3c"}), use_container_width=True)
     with rc:
-        st.write("🏆 최고 pts 기사 (Top 5)")
+        st.write("🏆 주요 포인트 기사 (Top 5)")
         for _, r in df.sort_values("pts", ascending=False).head(5).iterrows():
             st.caption(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
+        
+        st.write("---")
+        st.write("🚨 주요 리스크 기사 (Top 5)")
+        risk_top5 = df[df["감성"] == "부정"].sort_values("pts", ascending=False).head(5)
+        if not risk_top5.empty:
+            for _, r in risk_top5.iterrows():
+                st.warning(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
+        else:
+            st.caption("수집된 리스크 기사가 없습니다.")
 
     st.divider()
     st.subheader("📂 뉴스 클리핑 상세 리스트 (그룹 A/B/C)")
@@ -296,11 +284,14 @@ if "df" in st.session_state and st.session_state["df"] is not None:
         for _, row in df_view.iterrows():
             badge = f'<span style="{GROUP_BADGE.get(row["그룹"], GROUP_BADGE[""])}">{row["그룹"] if row["그룹"] else "미분류"}</span>'
             pick = '<span style="color:#e74c3c;font-weight:bold;">PICK</span>' if row["PICK"] == "PICK" else ""
+            sent_style = 'color:#e74c3c;font-weight:bold;' if row["감성"] == "부정" else ('color:#2ecc71;' if row["감성"] == "긍정" else '')
             rows += f'<tr style="background:{GROUP_COLORS.get(row["그룹"], "#FFF")}; border-bottom:1px solid #eee;">' \
                     f'<td style="padding:10px;">{badge}</td><td>{row["매체명"]}</td>' \
                     f'<td><a href="{row["링크"]}" target="_blank" style="text-decoration:none; color:#1f1f1f;">{row["제목_표시"]}</a></td>' \
-                    f'<td style="text-align:center;">{pick}</td><td style="font-weight:bold;">{row["pts"]}</td><td>{row["게시일"]}</td></tr>'
-        return f'<table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#2C3E50; color:white; text-align:left;"><th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>pts</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
+                    f'<td style="text-align:center;">{pick}</td>' \
+                    f'<td style="text-align:center; {sent_style}">{row["감성"]}</td>' \
+                    f'<td style="font-weight:bold;">{row["pts"]}</td><td>{row["게시일"]}</td></tr>'
+        return f'<table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#2C3E50; color:white; text-align:left;"><th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>감성</th><th>pts</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
 
     st.markdown(render_table(df), unsafe_allow_html=True)
 
