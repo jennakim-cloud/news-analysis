@@ -13,8 +13,8 @@ from bs4 import BeautifulSoup
 # ══════════════════════════════════════════════════════════════
 #  1. 설정값 및 가중치 사전
 # ══════════════════════════════════════════════════════════════
-MAX_WORKERS     = 10
-REQUEST_TIMEOUT = 8
+MAX_WORKERS     = 15  # 병렬 처리량 증가
+REQUEST_TIMEOUT = 2   # 타임아웃을 2초로 단축 (로딩 방지 핵심)
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'}
 
 WEIGHTS = {
@@ -22,7 +22,6 @@ WEIGHTS = {
     "PICK_MULTIPLIER": 1.5, "TITLE_BONUS": 3.0
 }
 
-# 고정 코너 및 종합 보도 패널티 키워드
 BRIEF_KEYWORDS = [
     "브리프", "뉴스픽", "정리", "단신", "게시판", "소식", "모음", "업계", "유통가", "외", "外", 
     "DD퇴근길", "AT패션", "N2 유통", "유통 레이더", "유통갤러리", "유통가 뉴스픽", 
@@ -34,7 +33,6 @@ SENTIMENT_DICT = {
     "negative": ["논란", "위기", "적자", "하락", "감소", "조사", "의혹", "비판", "중단", "우려", "갈등", "부진"]
 }
 
-GROUP_COLORS = {"그룹 A": "#D5F5E3", "그룹 B": "#FEF9E7", "그룹 C": "#FDEBD0", "": "#FFFFFF"}
 GROUP_BADGE = {
     "그룹 A": "background:#D5F5E3; color:#1e7e34; padding:2px 8px; border-radius:4px; font-weight:bold;",
     "그룹 B": "background:#FEF9E7; color:#856404; padding:2px 8px; border-radius:4px; font-weight:bold;",
@@ -42,8 +40,10 @@ GROUP_BADGE = {
     "":       "color:#999; padding:2px 8px;",
 }
 
+GROUP_COLORS = {"그룹 A": "#D5F5E3", "그룹 B": "#FEF9E7", "그룹 C": "#FDEBD0", "": "#FFFFFF"}
+
 # ══════════════════════════════════════════════════════════════
-#  2. 매핑 테이블
+#  2. 매핑 테이블 (사용자 원본 데이터 유지용 섹션)
 # ══════════════════════════════════════════════════════════════
 
 FIXED_MAP = {
@@ -135,76 +135,69 @@ GROUP_MAP = {
     "한국일보":"그룹 A","한국정경신문":"그룹 C","한스경제":"그룹 B","허프포스트":"그룹 C","헤럴드경제":"그룹 A",
     "현대경제신문":"그룹 C","후지TV":"그룹 C","MTN":"그룹 A",
 }
-# ══════════════════════════════════════════════════════════════
-
-FIXED_MAP = {
-    # 여기에 기존 FIXED_MAP 데이터를 붙여넣으세요.
-}
-
-OID_MAP = {
-    # 여기에 기존 OID_MAP 데이터를 붙여넣으세요.
-}
-
-GROUP_MAP = {
-    # 여기에 기존 GROUP_MAP 데이터를 붙여넣으세요.
-}
 
 # ══════════════════════════════════════════════════════════════
-#  3. 핵심 분석 및 수집 엔진
+#  3. 지능형 분석 엔진 (속도 최적화 버전)
 # ══════════════════════════════════════════════════════════════
 
 def analyze_article_content(link: str, query: str, title: str, is_pick: bool):
-    """본문 밀도 분석 및 제목 구조 기반 강제 페널티 로직"""
+    """속도 저하를 막기 위해 제목을 우선 분석하고, 본문은 빠르게 시도"""
     penalty_ratio = 1.0
     freq_score = 0.0
     sentiment_val = 0.0
     p_mult = 1.0
     
-    # [1] 제목 기반 강제 페널티 판별
+    # [1] 제목 기반 즉각 분석 (로딩 없이 즉시 실행)
     list_markers = title.count('·') + title.count(',') + title.count('|') + title.count('/')
     is_brief_corner = any(k in title for k in BRIEF_KEYWORDS)
     
     if is_brief_corner or list_markers >= 2:
         query_pos = title.find(query)
-        if 0 <= query_pos <= 12: 
-            penalty_ratio = 0.8 # 제목 서두에 키워드 노출 시 구제
+        if 0 <= query_pos <= 12: # 제목 서두에 있으면 주인공 인정
+            penalty_ratio = 0.8
         else:
-            penalty_ratio = 0.45 # 나열식 종합 기사 강력 페널티 (그룹A 10pt -> 4.5pt 시작)
+            penalty_ratio = 0.45 # 나열형 강력 패널티 (10pt -> 4.5pt)
 
+    # [2] 본문 크롤링 (Timeout을 아주 짧게 설정하여 로딩 방지)
     try:
-        res = requests.get(link, headers=HEADERS, timeout=REQUEST_TIMEOUT)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        # 외부 매체 대응을 위한 선택자 확장
-        content = soup.select_one('#newsct_article, #articeBody, .view_con, #articleBodyContents, .article_view, #articleBody, .post-content')
+        # 네이버 뉴스거나, 어패럴뉴스와 같이 점수 보정이 꼭 필요한 매체만 시도
+        can_crawl = any(domain in link for domain in ["naver.com", "apparelnews", "ajunews", "biztribune"])
         
-        if content:
-            text = content.get_text()
-            text_len = len(text)
-            count = text.count(query)
+        if can_crawl:
+            res = requests.get(link, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            soup = BeautifulSoup(res.text, 'html.parser')
+            content = soup.select_one('#newsct_article, #articeBody, .view_con, #articleBodyContents, .article_view')
             
-            density = (count * 1000) / text_len if text_len > 0 else 0
-            is_listing = True if text_len > 1000 and density < 1.5 else False
-            
-            freq_score = min(density * 2.0, 5.0)
-            if query in text[:200]: freq_score += 1.5 
-            
-            # 나열형 기사는 PICK 가중치(1.5배) 무효화
-            p_mult = WEIGHTS["PICK_MULTIPLIER"] if (is_pick and not is_listing) else 1.0
-            
-            pos = sum(text.count(w) for w in SENTIMENT_DICT["positive"])
-            neg = sum(text.count(w) for w in SENTIMENT_DICT["negative"])
-            sentiment_val = (pos - neg) / (pos + neg) if (pos + neg) > 0 else 0.0
+            if content:
+                text = content.get_text()
+                text_len = len(text)
+                count = text.count(query)
+                
+                density = (count * 1000) / text_len if text_len > 0 else 0
+                is_listing = True if text_len > 1000 and density < 1.5 else False
+                
+                freq_score = min(density * 2.0, 5.0)
+                if query in text[:200]: freq_score += 1.5 
+                
+                # 나열형 기사는 PICK 가중치 취소
+                p_mult = WEIGHTS["PICK_MULTIPLIER"] if (is_pick and not is_listing) else 1.0
+                
+                # 감성 분석
+                pos = sum(text.count(w) for w in SENTIMENT_DICT["positive"])
+                neg = sum(text.count(w) for w in SENTIMENT_DICT["negative"])
+                sentiment_val = (pos - neg) / (pos + neg) if (pos + neg) > 0 else 0.0
+            else:
+                # 본문을 못 찾을 경우 제목 페널티 유지
+                if penalty_ratio < 1.0: freq_score = 0.5
         else:
-            # 본문을 못 읽는 경우 방어 로직: 제목이 나열형이면 낮은 기본점수 부여
+            # 크롤링 미지원 매체는 제목 기반 분석값만 반환
             if penalty_ratio < 1.0: freq_score = 0.5
+            
     except:
-        pass
+        # 오류 발생 시 기다리지 않고 즉시 반환
+        if penalty_ratio < 1.0: freq_score = 0.5
         
     return freq_score, sentiment_val, penalty_ratio, p_mult
-
-def clean_html_text(text: str) -> str:
-    if not text: return ""
-    return html.unescape(re.sub(r'<[^>]*>', '', text)).replace('"', "'")
 
 def publisher_from_url(link: str) -> str:
     if "naver.com" in link:
@@ -224,7 +217,8 @@ def fetch_naver_article_info(link: str) -> dict:
     res_info = {"publisher": publisher_from_url(link), "pick": ""}
     if "naver.com" not in link: return res_info
     try:
-        res = requests.get(link, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        # 네이버 기사는 속도가 빠르므로 정보를 긁어옴
+        res = requests.get(link, headers=HEADERS, timeout=1.5)
         soup = BeautifulSoup(res.text, 'html.parser')
         logo = soup.select_one('a.press_logo img, .media_end_head_top a img')
         if logo: res_info["publisher"] = logo.get('alt', '').strip()
@@ -238,27 +232,25 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
     kst = timezone(timedelta(hours=9))
     
     raw_items = []
-    for start_index in range(1, 301, 100):
+    # 검색량을 200개로 조절하여 속도 확보
+    for start_index in range(1, 201, 100):
         url = f"https://openapi.naver.com/v1/search/news.json?query={query}&display=100&start={start_index}&sort=date"
         res = requests.get(url, headers=naver_headers)
         if res.status_code != 200: break
         items = res.json().get('items', [])
         for item in items:
             pub_date = datetime.strptime(item['pubDate'], '%a, %d %b %Y %H:%M:%S +0900').replace(tzinfo=kst)
-            if pub_date < start_dt: continue
-            if pub_date > end_dt: continue
-            raw_items.append({"pub_date": pub_date, "link": item.get('link', ''), "title": clean_html_text(item.get('title', ''))})
+            if start_dt <= pub_date <= end_dt:
+                raw_items.append({"pub_date": pub_date, "link": item.get('link', ''), "title": html.unescape(re.sub(r'<[^>]*>', '', item.get('title', '')))})
     
     if not raw_items: return None
 
     crawl_results = {}
-    total = len(raw_items)
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_idx = {executor.submit(fetch_naver_article_info, item["link"]): idx for idx, item in enumerate(raw_items)}
-        for future in as_completed(future_to_idx):
-            idx = future_to_idx[future]
-            crawl_results[idx] = future.result()
-            progress_bar.progress(int((idx+1)/total * 70))
+        future_to_idx = {executor.submit(fetch_naver_article_info, item["link"]): i for i, item in enumerate(raw_items)}
+        for i, f in enumerate(as_completed(future_to_idx)):
+            crawl_results[future_to_idx[f]] = f.result()
+            progress_bar.progress(int((i+1)/len(raw_items)*60))
 
     news_data = []
     for idx, item in enumerate(raw_items):
@@ -282,35 +274,32 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
     return pd.DataFrame(news_data)
 
 # ══════════════════════════════════════════════════════════════
-#  4. UI 프레임워크
+#  4. UI
 # ══════════════════════════════════════════════════════════════
 st.set_page_config(page_title="영향력 분석 시스템", layout="wide")
 st.title("🚀 이슈 파급력 & 리스크 모니터링")
-st.caption("매체 파워, 본문 집중도, 고정 코너 패턴을 분석하여 포인트(pts)를 산출합니다.")
 
 with st.sidebar:
     st.header("🔐 시스템 상태")
     try:
         c_id = st.secrets["naver"]["client_id"]; c_secret = st.secrets["naver"]["client_secret"]
-        st.success("API 서버 연결됨")
+        st.success("API 연결됨")
     except:
-        st.error("Secrets 설정 확인 필요"); st.stop()
+        st.error("API Secrets 누락"); st.stop()
 
 st.divider()
 c1, c2, c3 = st.columns([2, 2, 1])
 with c1: query = st.text_input("검색 키워드", placeholder="예: 무신사 서울숲")
 with c2: 
-    today = datetime.now()
-    date_range = st.date_input("검색 기간 설정", value=(today - timedelta(days=7), today), max_value=today)
-with c3: st.write(""); search_btn = st.button("🔍 데이터 분석 시작", type="primary", use_container_width=True)
+    today = datetime.now(); date_range = st.date_input("기간 설정", value=(today - timedelta(days=7), today), max_value=today)
+with c3: st.write(""); search_btn = st.button("🔍 데이터 분석", type="primary", use_container_width=True)
 
 if search_btn and query:
-    if len(date_range) != 2: st.warning("시작일과 종료일을 모두 선택해주세요.")
+    if len(date_range) != 2: st.warning("시작일과 종료일을 선택하세요.")
     else:
-        start_date, end_date = date_range
         kst = timezone(timedelta(hours=9))
-        start_dt = datetime.combine(start_date, datetime.min.time()).replace(tzinfo=kst)
-        end_dt = datetime.combine(end_date, datetime.max.time()).replace(tzinfo=kst)
+        start_dt = datetime.combine(date_range[0], datetime.min.time()).replace(tzinfo=kst)
+        end_dt = datetime.combine(date_range[1], datetime.max.time()).replace(tzinfo=kst)
         pb = st.progress(0)
         st.session_state["df"] = run_search(query, c_id, c_secret, pb, start_dt, end_dt)
         st.session_state["query_val"] = query
@@ -320,7 +309,7 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("종합 파급력", f"{df['pts'].sum():,.1f} pts")
+    m1.metric("종합 파격력", f"{df['pts'].sum():,.1f} pts")
     m2.metric("평균 영향력", f"{df['pts'].mean():.1f} pts")
     m3.metric("🟢 호재 지수", f"{df['긍정pts'].sum():,.1f} pts")
     m4.metric("🔴 리스크 지수", f"{df['부정pts'].sum():,.1f} pts", delta_color="inverse")
@@ -328,7 +317,6 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     st.divider()
     lc, rc = st.columns([1.5, 1])
     with lc:
-        st.write("📊 시간별 긍정/부정 파급력 추이 (pts)")
         st.plotly_chart(px.bar(df, x="게시일", y=["긍정pts", "부정pts"], color_discrete_map={"긍정pts": "#2ecc71", "부정pts": "#e74c3c"}), use_container_width=True)
     with rc:
         st.write("🏆 주요 기사 (Top 5)")
@@ -336,29 +324,26 @@ if "df" in st.session_state and st.session_state["df"] is not None:
             st.caption(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
         st.write("---")
         st.write("🚨 리스크 기사 (Top 5)")
-        risk_top5 = df[df["감성"] == "부정"].sort_values("pts", ascending=False).head(5)
-        if not risk_top5.empty:
-            for _, r in risk_top5.iterrows(): st.warning(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
-        else: st.caption("수집된 리스크 기사가 없습니다.")
+        risk_t5 = df[df["감성"] == "부정"].sort_values("pts", ascending=False).head(5)
+        for _, r in risk_t5.iterrows(): st.warning(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
 
     st.divider()
-    st.subheader("📂 뉴스 클리핑 상세 리스트")
+    st.subheader("📂 뉴스 상세 리스트")
     f1, f2, f3, f4 = st.columns([2, 1, 2, 1.5])
-    with f1: sel_groups = st.multiselect("매체 그룹", options=["그룹 A", "그룹 B", "그룹 C", "미분류"], default=["그룹 A", "그룹 B", "그룹 C", "미분류"])
-    with f2: st.write(""); pick_only = st.checkbox("PICK만 보기")
-    with f3: sel_sents = st.multiselect("감성 필터", options=["긍정", "중립", "부정"], default=["긍정", "중립", "부정"])
-    with f4: sort_by = st.selectbox("정렬 기준", ["포인트 높은순", "최신순", "포인트 낮은순"])
+    with f1: sel_groups = st.multiselect("매체 그룹", ["그룹 A", "그룹 B", "그룹 C", "미분류"], default=["그룹 A", "그룹 B", "그룹 C", "미분류"])
+    with f2: st.write(""); pick_only = st.checkbox("PICK 기사")
+    with f3: sel_sents = st.multiselect("감성", ["긍정", "중립", "부정"], default=["긍정", "중립", "부정"])
+    with f4: sort_by = st.selectbox("정렬", ["포인트 높은순", "최신순", "포인트 낮은순"])
 
     mask = pd.Series([True] * len(df), index=df.index)
-    mapped_sel_groups = [("" if g == "미분류" else g) for g in sel_groups]
-    mask &= df["그룹"].isin(mapped_sel_groups)
+    mask &= df["그룹"].isin([("" if g=="미분류" else g) for g in sel_groups])
     if pick_only: mask &= df["PICK"] == "PICK"
     mask &= df["감성"].isin(sel_sents)
-    df_filtered = df[mask].copy()
-
-    if sort_by == "포인트 높은순": df_filtered = df_filtered.sort_values(by="pts", ascending=False)
-    elif sort_by == "포인트 낮은순": df_filtered = df_filtered.sort_values(by="pts", ascending=True)
-    else: df_filtered = df_filtered.sort_values(by="게시일", ascending=False)
+    
+    df_f = df[mask].copy()
+    if sort_by == "포인트 높은순": df_f = df_f.sort_values("pts", ascending=False)
+    elif sort_by == "포인트 낮은순": df_f = df_f.sort_values("pts", ascending=True)
+    else: df_f = df_f.sort_values("게시일", ascending=False)
 
     def render_table(df_view):
         rows = ""
@@ -373,9 +358,9 @@ if "df" in st.session_state and st.session_state["df"] is not None:
                     f'<td style="font-weight:bold;">{row["pts"]}</td><td>{row["게시일"]}</td></tr>'
         return f'<table style="width:100%; border-collapse:collapse;"><thead><tr style="background:#2C3E50; color:white; text-align:left;"><th>그룹</th><th>매체명</th><th>제목</th><th>PICK</th><th>감성</th><th>pts</th><th>게시일</th></tr></thead><tbody>{rows}</tbody></table>'
 
-    st.markdown(render_table(df_filtered), unsafe_allow_html=True)
+    st.markdown(render_table(df_f), unsafe_allow_html=True)
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df_filtered[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
-    st.download_button("📥 엑셀 결과 다운로드", output.getvalue(), f"analysis_{st.session_state.get('query_val', 'report')}.xlsx", type="primary", use_container_width=True)
+        df_f[["그룹", "매체명", "제목", "PICK", "게시일", "pts", "감성"]].to_excel(writer, index=False)
+    st.download_button("📥 엑셀 다운로드", output.getvalue(), f"news_report.xlsx", type="primary", use_container_width=True)
