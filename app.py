@@ -276,7 +276,7 @@ def run_search(query, client_id, client_secret, progress_bar, start_dt, end_dt):
 # ══════════════════════════════════════════════════════════════
 #  4. UI
 # ══════════════════════════════════════════════════════════════
-st.set_page_config(page_title="영향력 분석 시스템", layout="wide")
+st.set_page_config(page_title="커버리지 분석", layout="wide")
 st.title("🚀 이슈 파급력 & 리스크 모니터링")
 
 with st.sidebar:
@@ -309,8 +309,8 @@ if "df" in st.session_state and st.session_state["df"] is not None:
     
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("종합 파격력", f"{df['pts'].sum():,.1f} pts")
-    m2.metric("평균 영향력", f"{df['pts'].mean():.1f} pts")
+    m1.metric("종합 파급력", f"{df['pts'].sum():,.1f} pts")
+    m2.metric("평균 파급력", f"{df['pts'].mean():.1f} pts")
     m3.metric("🟢 호재 지수", f"{df['긍정pts'].sum():,.1f} pts")
     m4.metric("🔴 리스크 지수", f"{df['부정pts'].sum():,.1f} pts", delta_color="inverse")
 
