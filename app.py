@@ -263,7 +263,7 @@ if "df" in st.session_state and st.session_state["df"] is not None:
         st.write("📊 기간 내 파급력 추이 (pts)")
         st.plotly_chart(px.bar(df, x="게시일", y=["긍정pts", "부정pts"], color_discrete_map={"긍정pts": "#2ecc71", "부정pts": "#e74c3c"}), use_container_width=True)
     with rc:
-        st.write("🏆 주요 포인트 기사 (Top 5)")
+        st.write("🏆 주요 기사 (Top 5)")
         for _, r in df.sort_values("pts", ascending=False).head(5).iterrows():
             st.caption(f"**[{r['pts']} pts]** {r['매체명']} | {r['제목_표시']}")
         
